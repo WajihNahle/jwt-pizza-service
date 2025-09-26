@@ -1,5 +1,9 @@
 const request = require('supertest');
 const app = require('./service');
+const version = require('./version.json');
+const config = require('./config.js');
+
+
 
 const testUser = { name: 'pizza diner', email: 'reg@test.com', password: 'a' };
 let testUserAuthToken;
@@ -17,6 +21,32 @@ test('login', async () => {
 
   const { password, ...user } = { ...testUser, roles: [{ role: 'diner' }] };
   expect(loginRes.body.user).toMatchObject(user);
+});
 
+test('API Docs', async () => {
+  const res = await request(app).get('/api/docs')
+  expect(res.status).toBe(200);
+  expect(res.body.version).toBe(version.version);
+  expect(res.body.endpoints.length).toBeGreaterThan(0);
+  expect(res.body.config).toBeDefined();
+  expect(res.body.config.factory).toBe(config.factory.url);
+  expect(res.body.config.db).toBe(config.db.connection.host);
+})
+
+
+test('Homepage', async () => {
+  const res = await request(app).get('/');
+  expect(res.status).toBe(200);
+  expect(res.body.message).toBe('welcome to JWT Pizza');
+  expect(res.body.version).toBe(version.version);
+});
+
+test('Unknown endpoint', async () => {
+  const res = await request(app).get('/unknown-endpoint');
+  expect(res.status).toBe(404);
+  expect(res.body.message).toBe('unknown endpoint');
+});
+
+test('error handler', async () => {
   
 });
