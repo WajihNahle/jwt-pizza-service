@@ -37,6 +37,7 @@ beforeEach(() => {
     } else {
       res.status(500).json({ message: err.message });
     }
+    next() // done to fulfill linting error
   });
 
   jest.clearAllMocks();

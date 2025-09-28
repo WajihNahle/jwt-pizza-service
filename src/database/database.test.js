@@ -1,7 +1,6 @@
 const { DB, Role } = require('./database.js');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
-const dbModel = require('./dbModel.js');
 
 jest.mock('mysql2/promise');
 jest.mock('bcrypt');
@@ -87,3 +86,58 @@ jest.mock('bcrypt');
     connectionMock.execute.mockResolvedValue([[]]);
     await expect(DB.getID(connectionMock, 'name', 'test', 'table')).rejects.toThrow('No ID found');
     });
+
+test('updateUser updates user and calls getUser', async () => {
+  bcrypt.hash.mockResolvedValue('hashedPass');
+  connectionMock.execute.mockResolvedValue([{}]);
+  const getUserSpy = jest.spyOn(DB, 'getUser').mockResolvedValue({ updated: true });
+  const result = await DB.updateUser(1, 'NewName', 'new@test.com', 'pass');
+  expect(result).toEqual({ updated: true });
+  expect(getUserSpy).toHaveBeenCalledWith('new@test.com', 'pass');
+});
+
+
+
+test('getOrders returns orders with items', async () => {
+  connectionMock.execute
+    .mockResolvedValueOnce([[{ id: 1, franchiseId: 1, storeId: 1, date: '2025-01-01' }]])
+    .mockResolvedValueOnce([[{ id: 10, menuId: 1, description: 'Pizza', price: 10 }]]);
+  const result = await DB.getOrders({ id: 1 });
+  expect(result.orders[0].items).toHaveLength(1);
+  expect(result.page).toBe(1);
+});
+
+test('deleteFranchise rolls back on error', async () => {
+  connectionMock.beginTransaction.mockResolvedValue();
+  connectionMock.execute.mockRejectedValueOnce(new Error('fail'));
+  connectionMock.rollback.mockResolvedValue();
+  await expect(DB.deleteFranchise(1)).rejects.toThrow('unable to delete franchise');
+});
+
+test('getFranchises returns list and sets stores', async () => {
+  connectionMock.execute.mockResolvedValue([[{ id: 1, name: 'F' }]]);
+  const result = await DB.getFranchises({ isRole: () => false });
+  expect(result[0][0].stores).toBeDefined();
+});
+
+test('getUserFranchises returns empty array when none', async () => {
+  connectionMock.execute.mockResolvedValue([[]]);
+  const result = await DB.getUserFranchises(1);
+  expect(result).toEqual([]);
+});
+
+test('getFranchise attaches admins and stores', async () => {
+  connectionMock.execute
+    .mockResolvedValueOnce([[{ id: 1, name: 'A', email: 'a@test.com' }]]) // admins
+    .mockResolvedValueOnce([[{ id: 1, name: 'Store', totalRevenue: 100 }]]); // stores
+  const franchise = { id: 1 };
+  const result = await DB.getFranchise(franchise);
+  expect(result.admins).toBeDefined();
+  expect(result.stores).toBeDefined();
+});
+
+test('createStore inserts store', async () => {
+  connectionMock.execute.mockResolvedValue([{ insertId: 50 }]);
+  const result = await DB.createStore(1, { name: 'S' });
+  expect(result.id).toBe(50);
+});
