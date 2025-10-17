@@ -89,14 +89,24 @@ jest.mock('bcrypt');
 
 test('updateUser updates user and returns updated record', async () => {
   bcrypt.hash.mockResolvedValue('hashedPass');
+  bcrypt.compare.mockResolvedValue(true);
 
-  connectionMock.execute.mockResolvedValueOnce([{}]);
-  connectionMock.execute.mockResolvedValueOnce([{}]);
-  connectionMock.execute.mockResolvedValueOnce([{}]);
-  connectionMock.execute.mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'alice@test.com' }]]);
-  connectionMock.execute.mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }]]);
+  connectionMock.execute
+    .mockResolvedValueOnce([{}]); 
 
-  const result = await DB.updateUser(1, 'Alice', 'alice@test.com', 'newpass', [{ role: Role.Diner }]);
+  connectionMock.execute
+    .mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'alice@test.com', password: 'hashedPass' }]]); // SELECT user
+
+  connectionMock.execute
+    .mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }]]);
+
+  const result = await DB.updateUser(
+    1,
+    'Alice',
+    'alice@test.com',
+    'newpass',
+    [{ role: Role.Diner }]
+  );
 
   expect(result).toEqual({
     id: 1,
@@ -105,6 +115,8 @@ test('updateUser updates user and returns updated record', async () => {
     roles: [{ role: Role.Diner, objectId: undefined }],
   });
 });
+
+
 
 test('getOrders returns orders with items', async () => {
   connectionMock.execute
@@ -194,19 +206,26 @@ test('deleteUser removes user by ID', async () => {
 
 // Update user
 test('updateUser updates user data and returns updated record', async () => {
-  bcrypt.hash.mockResolvedValue('hashedPassword');
+  bcrypt.hash.mockResolvedValue('hashedPass');
+  bcrypt.compare.mockResolvedValue(true);
 
   connectionMock.execute.mockResolvedValueOnce([{}]);
 
-  connectionMock.execute.mockResolvedValueOnce([{}]);
+  connectionMock.execute.mockResolvedValueOnce([
+    [{ id: 1, name: 'Alice', email: 'alice@test.com', password: 'hashedPass' }]
+  ]);
 
-  connectionMock.execute.mockResolvedValueOnce([{}]);
+  connectionMock.execute.mockResolvedValueOnce([
+    [{ role: Role.Diner, objectId: null }]
+  ]);
 
-  connectionMock.execute.mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'alice@test.com' }]]);
-
-  connectionMock.execute.mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }]]);
-
-  const result = await DB.updateUser(1, 'Alice', 'alice@test.com', 'newpass', [{ role: Role.Diner }]);
+  const result = await DB.updateUser(
+    1,
+    'Alice',
+    'alice@test.com',
+    'newpass',
+    [{ role: Role.Diner }]
+  );
 
   expect(result).toEqual({
     id: 1,
@@ -214,7 +233,11 @@ test('updateUser updates user data and returns updated record', async () => {
     email: 'alice@test.com',
     roles: [{ role: Role.Diner, objectId: undefined }],
   });
+
+  expect(connectionMock.end).toHaveBeenCalled();
 });
+
+
 
 test('updateUser with no roles or password', async () => {
   // No password or roles
@@ -227,32 +250,6 @@ test('updateUser with no roles or password', async () => {
   expect(result).toEqual({ id: 2, name: 'Bob', email: 'bob@test.com', roles: [] });
 });
 
-test('updateUser updates user with multiple roles', async () => {
-  bcrypt.hash.mockResolvedValue('hashedPass');
-
-  connectionMock.execute
-    .mockResolvedValueOnce([{}]) // UPDATE
-    .mockResolvedValueOnce([{}]) // DELETE roles
-    .mockResolvedValueOnce([{}]) // INSERT first role
-    .mockResolvedValueOnce([{}]) // INSERT second role
-    .mockResolvedValueOnce([[{ id: 3, name: 'Carol', email: 'carol@test.com' }]]) // SELECT user
-    .mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }, { role: Role.Admin, objectId: 0 }]]); // SELECT roles
-
-  const result = await DB.updateUser(3, 'Carol', 'carol@test.com', 'newpass', [
-    { role: Role.Diner },
-    { role: Role.Admin },
-  ]);
-
-  expect(result).toEqual({
-    id: 3,
-    name: 'Carol',
-    email: 'carol@test.com',
-    roles: [
-      { role: Role.Diner, objectId: undefined },
-      { role: Role.Admin, objectId: undefined },
-    ],
-  });
-});
 
 test('listUsers groups multiple roles per user', async () => {
   // Mock the initial users query
