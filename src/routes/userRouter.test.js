@@ -38,50 +38,30 @@ app.use('/users', userRouter);
 
 describe('userRouter', () => {
   test('GET /users returns paginated users', async () => {
-    const mockUsers = [
-      { id: 1, name: 'Alice', email: 'a@test.com' },
-      { id: 2, name: 'Bob', email: 'b@test.com' },
-    ];
-    const mockRoles = [{ role: 'diner', objectId: null }];
+  const mockUsers = [
+    { id: 1, name: 'Alice', email: 'a@test.com', roles: [{ role: 'diner' }] },
+    { id: 2, name: 'Bob', email: 'b@test.com', roles: [{ role: 'diner' }] },
+  ];
 
-    // DB.query mocks in order called
-    DB.query
-      .mockResolvedValueOnce(mockUsers) // get users
-      .mockResolvedValueOnce(mockRoles) // roles for Alice
-      .mockResolvedValueOnce(mockRoles) // roles for Bob
-      .mockResolvedValueOnce([{ count: 2 }]); // total rows
+  // Mock DB.listUsers to return [users, more]
+  DB.listUsers = jest.fn().mockResolvedValue([mockUsers, false]);
 
-    const res = await request(app).get('/users?page=1&limit=10');
+  const res = await request(app).get('/users?page=1&limit=10');
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body.users.length).toBe(2);
-    expect(res.body.users[0].roles).toEqual(mockRoles);
-    expect(res.body.more).toBe(false);
-  });
+  expect(res.statusCode).toBe(200);
+  expect(res.body.users.length).toBe(2);
+  expect(res.body.users[0].roles).toEqual([{ role: 'diner' }]);
+  expect(res.body.more).toBe(false);
+
+  expect(DB.listUsers).toHaveBeenCalledWith('1', '10', undefined); // query params are strings
+});
+
 
   test('GET /users/me returns authenticated user', async () => {
     const res = await request(app).get('/users/me');
     expect(res.statusCode).toBe(200);
     expect(res.body).toEqual({ id: 1 }); // match what router actually returns
   });
-
-  //currently broken....
-//   test('PUT /users/:userId updates user', async () => {
-//     DB.updateUser = jest.fn().mockResolvedValue({
-//       id: 1,
-//       name: 'Alice',
-//       email: 'alice@test.com',
-//       roles: [{ role: 'diner' }],
-//     });
-
-//     const payload = { name: 'Alice', email: 'alice@test.com', password: 'newpass' };
-//     const res = await request(app).put('/users/1').send(payload);
-
-//     expect(res.statusCode).toBe(200);
-//     expect(DB.updateUser).toHaveBeenCalledWith(1, 'Alice', 'alice@test.com', 'newpass');
-//     expect(res.body.token).toBe('token123'); // from mocked setAuth
-//     expect(res.body.user.id).toBe(1);
-//   });
 
   test('DELETE /users/:userId deletes user successfully', async () => {
     const connection = await DB.getConnection();
@@ -106,4 +86,64 @@ describe('userRouter', () => {
     expect(res.body).toEqual({ message: 'User not found' });
     expect(connection.rollback).toHaveBeenCalled();
   });
+
+  test('PUT /:userId - non-admin updating another user returns 403', async () => {
+    const nonAdminAuth = (req, res, next) => {
+      req.user = { id: 2, isRole: () => false };
+      next();
+    };
+    app.put('/test/:userId', nonAdminAuth, userRouter.stack.find(r => r.route?.path === '/:userId').route.stack[1].handle);
+
+    const res = await request(app).put('/test/1').send({ name: 'New Name' });
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ message: 'unauthorized' });
+  });
+
+  test('GET /users returns paginated users', async () => {
+  const mockUsers = [
+    { id: 1, name: 'Alice', email: 'alice@test.com', roles: [{ role: 'diner' }] },
+    { id: 2, name: 'Bob', email: 'bob@test.com', roles: [{ role: 'admin' }] },
+  ];
+
+  // Mock DB.listUsers to return [users, more]
+  DB.listUsers = jest.fn().mockResolvedValue([mockUsers, false]);
+
+  const res = await request(app)
+    .get('/users')  // corrected path
+    .query({ page: 1, limit: 10, name: '*' });
+
+  expect(res.status).toBe(200);
+  expect(res.body).toEqual({
+    users: [
+      { id: 1, name: 'Alice', email: 'alice@test.com', roles: [{ role: 'diner' }] },
+      { id: 2, name: 'Bob', email: 'bob@test.com', roles: [{ role: 'admin' }] },
+    ],
+    more: false,
+  });
+
+  expect(DB.listUsers).toHaveBeenCalledWith('1', '10', '*'); // query params are strings
+});
+
+
+  test('DELETE /users/:userId - deleting non-existent user returns 404', async () => {
+  const mockConn = {
+    beginTransaction: jest.fn(),
+    commit: jest.fn(),
+    rollback: jest.fn(),
+    end: jest.fn(),
+  };
+  DB.getConnection.mockResolvedValue(mockConn);
+
+  // Mock queries: first deletes userRole, second attempts to delete user but returns 0 affected rows
+  DB.query.mockResolvedValueOnce({ affectedRows: 1 }); // delete userRole
+  DB.query.mockResolvedValueOnce({ affectedRows: 0 }); // delete user fails
+
+  const res = await request(app).delete('/users/999'); // correct route
+
+  expect(res.status).toBe(404);
+  expect(res.body).toEqual({ message: 'User not found' });
+  expect(mockConn.rollback).toHaveBeenCalled();
+  expect(mockConn.end).toHaveBeenCalled();
+  });
+
 });

@@ -151,27 +151,35 @@ test('createStore inserts store', async () => {
 });
 
 // List users (paginated and filtered)
-test('listUsers returns paginated users', async () => {
-  const mockQueryResult = [
-    { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Diner },
-    { id: 2, name: 'Bob', email: 'b@test.com', role: Role.Admin },
+test('listUsers returns paginated users with roles', async () => {
+  // Mock users returned by first query
+  const mockUsers = [
+    { id: 1, name: 'Alice', email: 'alice@test.com' },
+    { id: 2, name: 'Bob', email: 'bob@test.com' },
   ];
 
-  connectionMock.execute.mockResolvedValue([mockQueryResult]);
+  // Mock roles for each user
+  const mockRolesAlice = [{ role: Role.Diner, objectId: null }];
+  const mockRolesBob = [{ role: Role.Admin, objectId: null }];
 
-  const result = await DB.listUsers(1, 10, '*');
+  // Mock queries in order: users, roles for Alice, roles for Bob
+  connectionMock.execute
+    .mockResolvedValueOnce([mockUsers])      // query users
+    .mockResolvedValueOnce([mockRolesAlice]) // query roles for Alice
+    .mockResolvedValueOnce([mockRolesBob]);  // query roles for Bob
 
-  expect(result).toEqual({
-    users: [
-      { id: 1, name: 'Alice', email: 'a@test.com', roles: [{ role: Role.Diner }] },
-      { id: 2, name: 'Bob', email: 'b@test.com', roles: [{ role: Role.Admin }] },
-    ],
-    more: false,
-  });
+  const [users, more] = await DB.listUsers(1, 10, '*');
 
+  // Expected output
+  const expectedUsers = [
+    { id: 1, name: 'Alice', email: 'alice@test.com', roles: [{ role: Role.Diner, objectId: undefined }] },
+    { id: 2, name: 'Bob', email: 'bob@test.com', roles: [{ role: Role.Admin, objectId: undefined }] },
+  ];
+
+  expect(users).toEqual(expectedUsers);
+  expect(more).toBe(false);
   expect(connectionMock.end).toHaveBeenCalled();
 });
-
 
 // Delete user
 test('deleteUser removes user by ID', async () => {
@@ -247,23 +255,40 @@ test('updateUser updates user with multiple roles', async () => {
 });
 
 test('listUsers groups multiple roles per user', async () => {
-  connectionMock.execute.mockResolvedValue([
-    [
-      { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Diner },
-      { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Admin },
-    ],
-  ]);
+  // Mock the initial users query
+  const mockUsers = [
+    { id: 1, name: 'Alice', email: 'a@test.com' },
+  ];
 
-  const result = await DB.listUsers(1, 10, '*');
-  expect(result.users).toEqual([
+  // Mock roles query for Alice
+  const mockRolesAlice = [
+    { role: Role.Diner, objectId: null },
+    { role: Role.Admin, objectId: null },
+  ];
+
+  // Mock queries in order: users, roles for Alice
+  connectionMock.execute
+    .mockResolvedValueOnce([mockUsers])      // query users
+    .mockResolvedValueOnce([mockRolesAlice]); // query roles for Alice
+
+  const [users, more] = await DB.listUsers(1, 10, '*');
+
+  expect(users).toEqual([
     {
       id: 1,
       name: 'Alice',
       email: 'a@test.com',
-      roles: [{ role: Role.Diner }, { role: Role.Admin }],
+      roles: [
+        { role: Role.Diner, objectId: undefined },
+        { role: Role.Admin, objectId: undefined },
+      ],
     },
   ]);
+
+  expect(more).toBe(false);
+  expect(connectionMock.end).toHaveBeenCalled();
 });
+
 
 test('deleteFranchise commits successfully', async () => {
   connectionMock.beginTransaction.mockResolvedValue();

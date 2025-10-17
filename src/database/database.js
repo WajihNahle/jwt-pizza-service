@@ -282,40 +282,35 @@ class DB {
   }
 
   // ------------------ LIST USERS ------------------
-async listUsers(page = 1, limit = 10, nameFilter = '*') {
+async listUsers(page = 0, limit = 10, nameFilter = '*') {
   const connection = await this.getConnection();
-  try {
-    const offset = (page - 1) * limit;
-    const filter = nameFilter === '*' ? '%' : `%${nameFilter}%`;
 
-    const users = await this.query(
-      connection,
-      `SELECT u.id, u.name, u.email, ur.role
-       FROM user u
-       LEFT JOIN userRole ur ON u.id = ur.userId
-       WHERE u.name LIKE ?
-       ORDER BY u.id
-       LIMIT ? OFFSET ?`,
-      [filter, limit + 1, offset]
-    );
+    const offset = page * limit;
+    nameFilter = nameFilter.replace(/\*/g, '%');
 
-    const more = users.length > limit;
-    const resultUsers = more ? users.slice(0, limit) : users;
-
-    // Group roles by user
-    const grouped = resultUsers.reduce((acc, row) => {
-      if (!acc[row.id]) {
-        acc[row.id] = { id: row.id, name: row.name, email: row.email, roles: [] };
+    try {
+      let users = await this.query(connection, `SELECT id, name, email FROM user WHERE name LIKE ? LIMIT ${limit + 1} OFFSET ${offset}`, [nameFilter]);
+      const more = users.length > limit;
+      if (more) {
+        users = users.slice(0, limit);
       }
-      if (row.role) acc[row.id].roles.push({ role: row.role });
-      return acc;
-    }, {});
 
-    return { users: Object.values(grouped), more };
-  } finally {
-    connection.end();
+      for (const user of users){
+
+        // user.add role from mysql query
+        const roleResult = await this.query(connection, `SELECT * FROM userRole WHERE userId=?`, [user.id]);
+        const roles = roleResult.map((r) => {
+        return { objectId: r.objectId || undefined, role: r.role };
+        });
+
+        user.roles = roles
+      }
+
+      return [users, more];
+    } finally {
+      connection.end();
+    }
   }
-}
 
 // ------------------ DELETE USER ------------------
 async deleteUser(userId) {

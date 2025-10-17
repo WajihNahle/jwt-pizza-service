@@ -58,6 +58,7 @@ franchiseRouter.docs = [
 // getFranchises
 franchiseRouter.get(
   '/',
+  authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
     const [franchises, more] = await DB.getFranchises(req.user, req.query.page, req.query.limit, req.query.name);
     res.json({ franchises, more });

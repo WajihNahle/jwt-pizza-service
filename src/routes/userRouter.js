@@ -63,6 +63,7 @@ userRouter.docs = [
   }
 ];
 
+
 // getUser
 userRouter.get(
   '/me',
@@ -95,44 +96,8 @@ userRouter.get(
   '/',
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
-    const user = req.user;
-    if (!user.isRole(Role.Admin)) {
-      return res.status(403).json({ message: 'unauthorized' });
-    }
-
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 10;
-    const nameFilter = req.query.name ? req.query.name.replace(/\*/g, '%') : '%';
-
-    const connection = await DB.getConnection();
-    try {
-      const offset = (page - 1) * limit;
-      const users = await DB.query(
-        connection,
-        `SELECT id, name, email FROM user WHERE name LIKE ? ORDER BY id ASC LIMIT ?, ?`,
-        [nameFilter, offset, limit]
-      );
-
-      for (const u of users) {
-        const roles = await DB.query(
-          connection,
-          `SELECT role, objectId FROM userRole WHERE userId = ?`,
-          [u.id]
-        );
-        u.roles = roles.map((r) => ({ role: r.role, objectId: r.objectId }));
-      }
-
-      const totalRows = await DB.query(
-        connection,
-        `SELECT COUNT(*) as count FROM user WHERE name LIKE ?`,
-        [nameFilter]
-      );
-      const more = page * limit < totalRows[0].count;
-
-      res.json({ users, more });
-    } finally {
-      connection.end();
-    }
+    const [users, more] = await DB.listUsers(req.query.page, req.query.limit, req.query.name);
+    res.json({ users, more });
   })
 );
 

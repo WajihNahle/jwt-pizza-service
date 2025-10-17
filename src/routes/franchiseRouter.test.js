@@ -49,9 +49,14 @@ test('GET / should return franchises', async () => {
   const res = await request(app).get('/api/franchise');
   expect(res.statusCode).toBe(200);
   expect(res.body).toEqual({ franchises: [{ id: 1 }], more: true });
-  expect(DB.getFranchises).toHaveBeenCalledWith(undefined, undefined, undefined, undefined);
-
+  expect(DB.getFranchises).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 1 }), // req.user mock
+    undefined,                          // page
+    undefined,                          // limit
+    undefined                           // name
+  );
 });
+
 
 test('GET /:userId should return user franchises for same user', async () => {
   DB.getUserFranchises.mockResolvedValue([{ id: 2 }]);
