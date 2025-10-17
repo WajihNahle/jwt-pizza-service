@@ -87,16 +87,24 @@ jest.mock('bcrypt');
     await expect(DB.getID(connectionMock, 'name', 'test', 'table')).rejects.toThrow('No ID found');
     });
 
-test('updateUser updates user and calls getUser', async () => {
+test('updateUser updates user and returns updated record', async () => {
   bcrypt.hash.mockResolvedValue('hashedPass');
-  connectionMock.execute.mockResolvedValue([{}]);
-  const getUserSpy = jest.spyOn(DB, 'getUser').mockResolvedValue({ updated: true });
-  const result = await DB.updateUser(1, 'NewName', 'new@test.com', 'pass');
-  expect(result).toEqual({ updated: true });
-  expect(getUserSpy).toHaveBeenCalledWith('new@test.com', 'pass');
+
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+  connectionMock.execute.mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'alice@test.com' }]]);
+  connectionMock.execute.mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }]]);
+
+  const result = await DB.updateUser(1, 'Alice', 'alice@test.com', 'newpass', [{ role: Role.Diner }]);
+
+  expect(result).toEqual({
+    id: 1,
+    name: 'Alice',
+    email: 'alice@test.com',
+    roles: [{ role: Role.Diner, objectId: undefined }],
+  });
 });
-
-
 
 test('getOrders returns orders with items', async () => {
   connectionMock.execute
@@ -140,4 +148,188 @@ test('createStore inserts store', async () => {
   connectionMock.execute.mockResolvedValue([{ insertId: 50 }]);
   const result = await DB.createStore(1, { name: 'S' });
   expect(result.id).toBe(50);
+});
+
+// List users (paginated and filtered)
+test('listUsers returns paginated users', async () => {
+  const mockQueryResult = [
+    { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Diner },
+    { id: 2, name: 'Bob', email: 'b@test.com', role: Role.Admin },
+  ];
+
+  connectionMock.execute.mockResolvedValue([mockQueryResult]);
+
+  const result = await DB.listUsers(1, 10, '*');
+
+  expect(result).toEqual({
+    users: [
+      { id: 1, name: 'Alice', email: 'a@test.com', roles: [{ role: Role.Diner }] },
+      { id: 2, name: 'Bob', email: 'b@test.com', roles: [{ role: Role.Admin }] },
+    ],
+    more: false,
+  });
+
+  expect(connectionMock.end).toHaveBeenCalled();
+});
+
+
+// Delete user
+test('deleteUser removes user by ID', async () => {
+  connectionMock.execute.mockResolvedValue([{ affectedRows: 1 }]);
+  const result = await DB.deleteUser(1);
+  expect(result).toEqual({ message: 'User deleted' });
+
+  // Simulate user not found
+  connectionMock.execute.mockResolvedValue([{ affectedRows: 0 }]);
+  await expect(DB.deleteUser(999)).rejects.toThrow('User not found');
+});
+
+// Update user
+test('updateUser updates user data and returns updated record', async () => {
+  bcrypt.hash.mockResolvedValue('hashedPassword');
+
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+
+  connectionMock.execute.mockResolvedValueOnce([{}]);
+
+  connectionMock.execute.mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'alice@test.com' }]]);
+
+  connectionMock.execute.mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }]]);
+
+  const result = await DB.updateUser(1, 'Alice', 'alice@test.com', 'newpass', [{ role: Role.Diner }]);
+
+  expect(result).toEqual({
+    id: 1,
+    name: 'Alice',
+    email: 'alice@test.com',
+    roles: [{ role: Role.Diner, objectId: undefined }],
+  });
+});
+
+test('updateUser with no roles or password', async () => {
+  // No password or roles
+  connectionMock.execute
+    .mockResolvedValueOnce([{}]) // UPDATE user (name/email only)
+    .mockResolvedValueOnce([[{ id: 2, name: 'Bob', email: 'bob@test.com' }]]) // SELECT user
+    .mockResolvedValueOnce([[]]); // SELECT user roles
+
+  const result = await DB.updateUser(2, 'Bob', 'bob@test.com');
+  expect(result).toEqual({ id: 2, name: 'Bob', email: 'bob@test.com', roles: [] });
+});
+
+test('updateUser updates user with multiple roles', async () => {
+  bcrypt.hash.mockResolvedValue('hashedPass');
+
+  connectionMock.execute
+    .mockResolvedValueOnce([{}]) // UPDATE
+    .mockResolvedValueOnce([{}]) // DELETE roles
+    .mockResolvedValueOnce([{}]) // INSERT first role
+    .mockResolvedValueOnce([{}]) // INSERT second role
+    .mockResolvedValueOnce([[{ id: 3, name: 'Carol', email: 'carol@test.com' }]]) // SELECT user
+    .mockResolvedValueOnce([[{ role: Role.Diner, objectId: null }, { role: Role.Admin, objectId: 0 }]]); // SELECT roles
+
+  const result = await DB.updateUser(3, 'Carol', 'carol@test.com', 'newpass', [
+    { role: Role.Diner },
+    { role: Role.Admin },
+  ]);
+
+  expect(result).toEqual({
+    id: 3,
+    name: 'Carol',
+    email: 'carol@test.com',
+    roles: [
+      { role: Role.Diner, objectId: undefined },
+      { role: Role.Admin, objectId: undefined },
+    ],
+  });
+});
+
+test('listUsers groups multiple roles per user', async () => {
+  connectionMock.execute.mockResolvedValue([
+    [
+      { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Diner },
+      { id: 1, name: 'Alice', email: 'a@test.com', role: Role.Admin },
+    ],
+  ]);
+
+  const result = await DB.listUsers(1, 10, '*');
+  expect(result.users).toEqual([
+    {
+      id: 1,
+      name: 'Alice',
+      email: 'a@test.com',
+      roles: [{ role: Role.Diner }, { role: Role.Admin }],
+    },
+  ]);
+});
+
+test('deleteFranchise commits successfully', async () => {
+  connectionMock.beginTransaction.mockResolvedValue();
+  connectionMock.execute.mockResolvedValue([{}]); // all deletes
+  connectionMock.commit.mockResolvedValue();
+
+  await expect(DB.deleteFranchise(10)).resolves.toBeUndefined();
+  expect(connectionMock.commit).toHaveBeenCalled();
+});
+
+test('getUser returns user with multiple roles', async () => {
+  bcrypt.compare.mockResolvedValue(true);
+  connectionMock.execute
+    .mockResolvedValueOnce([[{ id: 1, name: 'Alice', email: 'a@test.com', password: 'hash' }]]) // SELECT user
+    .mockResolvedValueOnce([
+      [{ role: Role.Diner, objectId: null }, { role: Role.Admin, objectId: 0 }],
+    ]); // SELECT roles
+
+  const result = await DB.getUser('a@test.com', 'password');
+  expect(result).toEqual({
+    id: 1,
+    name: 'Alice',
+    email: 'a@test.com',
+    roles: [
+      { role: Role.Diner, objectId: undefined },
+      { role: Role.Admin, objectId: undefined },
+    ],
+    password: undefined,
+  });
+});
+
+test('getFranchises calls getFranchise for admin', async () => {
+  const franchise = { id: 1, name: 'F' };
+  connectionMock.execute.mockResolvedValue([[franchise]]);
+
+  const getFranchiseSpy = jest.spyOn(DB, 'getFranchise').mockResolvedValue({ ...franchise, stores: [] });
+
+  const result = await DB.getFranchises({ isRole: () => true });
+  expect(getFranchiseSpy).toHaveBeenCalled();
+});
+
+test('getTokenSignature returns empty string for invalid token', () => {
+  expect(DB.getTokenSignature('')).toBe('');
+  expect(DB.getTokenSignature('singlepart')).toBe('');
+});
+
+test('getID returns correct id', async () => {
+  connectionMock.execute.mockResolvedValue([[{ id: 123 }]]);
+  const id = await DB.getID(connectionMock, 'name', 'test', 'table');
+  expect(id).toBe(123);
+});
+
+test('addUser with no roles', async () => {
+  bcrypt.hash.mockResolvedValue('hash');
+  connectionMock.execute.mockResolvedValueOnce([{ insertId: 1 }]);
+  const user = { name: 'X', email: 'x@test.com', password: 'pass', roles: [] };
+  const result = await DB.addUser(user);
+  expect(result.id).toBe(1);
+});
+
+test('updateUser returns empty roles if none provided', async () => {
+  connectionMock.execute
+    .mockResolvedValueOnce([{}])
+    .mockResolvedValueOnce([[{ id: 5, name: 'Eve', email: 'eve@test.com' }]])
+    .mockResolvedValueOnce([[]]);
+
+  const result = await DB.updateUser(5, 'Eve', 'eve@test.com');
+  expect(result.roles).toEqual([]);
 });

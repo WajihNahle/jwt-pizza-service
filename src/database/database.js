@@ -281,6 +281,102 @@ class DB {
     }
   }
 
+  // ------------------ LIST USERS ------------------
+async listUsers(page = 1, limit = 10, nameFilter = '*') {
+  const connection = await this.getConnection();
+  try {
+    const offset = (page - 1) * limit;
+    const filter = nameFilter === '*' ? '%' : `%${nameFilter}%`;
+
+    const users = await this.query(
+      connection,
+      `SELECT u.id, u.name, u.email, ur.role
+       FROM user u
+       LEFT JOIN userRole ur ON u.id = ur.userId
+       WHERE u.name LIKE ?
+       ORDER BY u.id
+       LIMIT ? OFFSET ?`,
+      [filter, limit + 1, offset]
+    );
+
+    const more = users.length > limit;
+    const resultUsers = more ? users.slice(0, limit) : users;
+
+    // Group roles by user
+    const grouped = resultUsers.reduce((acc, row) => {
+      if (!acc[row.id]) {
+        acc[row.id] = { id: row.id, name: row.name, email: row.email, roles: [] };
+      }
+      if (row.role) acc[row.id].roles.push({ role: row.role });
+      return acc;
+    }, {});
+
+    return { users: Object.values(grouped), more };
+  } finally {
+    connection.end();
+  }
+}
+
+// ------------------ DELETE USER ------------------
+async deleteUser(userId) {
+  const connection = await this.getConnection();
+  try {
+    const result = await this.query(connection, `DELETE FROM user WHERE id=?`, [userId]);
+    if (result.affectedRows === 0) {
+      throw new StatusCodeError('User not found', 404);
+    }
+    return { message: 'User deleted' };
+  } finally {
+    connection.end();
+  }
+}
+
+// ------------------ UPDATE USER ------------------
+async updateUser(userId, name, email, password, roles = []) {
+  const connection = await this.getConnection();
+  try {
+    const updates = [];
+    const params = [];
+
+    if (name) {
+      updates.push('name=?');
+      params.push(name);
+    }
+    if (email) {
+      updates.push('email=?');
+      params.push(email);
+    }
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updates.push('password=?');
+      params.push(hashedPassword);
+    }
+
+    if (updates.length > 0) {
+      await this.query(connection, `UPDATE user SET ${updates.join(', ')} WHERE id=?`, [...params, userId]);
+    }
+
+    if (roles.length) {
+      await this.query(connection, `DELETE FROM userRole WHERE userId=?`, [userId]);
+      for (const role of roles) {
+        await this.query(connection, `INSERT INTO userRole (userId, role, objectId) VALUES (?, ?, ?)`, [
+          userId,
+          role.role,
+          role.objectId || 0,
+        ]);
+      }
+    }
+
+    const updatedUser = await this.query(connection, `SELECT id, name, email FROM user WHERE id=?`, [userId]);
+    const userRoles = await this.query(connection, `SELECT role, objectId FROM userRole WHERE userId=?`, [userId]);
+
+    return { ...updatedUser[0], roles: userRoles.map((r) => ({ role: r.role, objectId: r.objectId || undefined })) };
+  } finally {
+    connection.end();
+  }
+}
+
+
   getOffset(currentPage = 1, listPerPage) {
     return (currentPage - 1) * [listPerPage];
   }

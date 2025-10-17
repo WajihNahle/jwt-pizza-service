@@ -114,3 +114,53 @@ test('POST / should handle failed factory API', async () => {
   expect(res.statusCode).toBe(500);
   expect(res.body).toEqual({ message: 'Failed to fulfill order at factory', followLinkToEndChaos: 'url' });
 });
+
+test('GET /users should return paginated users', async () => {
+  const users = [
+    { id: 1, name: 'Alice', email: 'alice@example.com', roles: [{ role: 'Admin' }] },
+    { id: 2, name: 'Bob', email: 'bob@example.com', roles: [] },
+  ];
+  DB.listUsers = jest.fn().mockResolvedValue({ users, more: false });
+
+  app.get('/api/users', async (req, res) => {
+    const result = await DB.listUsers();
+    res.status(200).json(result.users);
+  });
+
+  const res = await request(app).get('/api/users');
+  expect(res.statusCode).toBe(200);
+  expect(res.body).toEqual(users);
+  expect(DB.listUsers).toHaveBeenCalled();
+});
+
+test('DELETE /users/:id should delete a user', async () => {
+  DB.deleteUser = jest.fn().mockResolvedValue({ message: 'User deleted' });
+
+  app.delete('/api/users/:id', async (req, res) => {
+    const result = await DB.deleteUser(parseInt(req.params.id));
+    res.status(200).json(result);
+  });
+
+  const res = await request(app).delete('/api/users/1');
+  expect(res.statusCode).toBe(200);
+  expect(res.body).toEqual({ message: 'User deleted' });
+  expect(DB.deleteUser).toHaveBeenCalledWith(1);
+});
+
+test('PUT /users/:id should update a user', async () => {
+  const updatedUser = { id: 1, name: 'Alice Updated', email: 'alice@example.com', roles: [{ role: 'Admin' }] };
+  DB.updateUser = jest.fn().mockResolvedValue(updatedUser);
+
+  app.put('/api/users/:id', async (req, res) => {
+    const result = await DB.updateUser(parseInt(req.params.id), req.body.name, req.body.email, req.body.password, req.body.roles);
+    res.status(200).json(result);
+  });
+
+  const res = await request(app)
+    .put('/api/users/1')
+    .send({ name: 'Alice Updated', roles: [{ role: 'Admin' }] });
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body).toEqual(updatedUser);
+  expect(DB.updateUser).toHaveBeenCalledWith(1, 'Alice Updated', undefined, undefined, [{ role: 'Admin' }]);
+});

@@ -8,6 +8,23 @@ const userRouter = express.Router();
 userRouter.docs = [
   {
     method: 'GET',
+    path: '/api/user?page=1&limit=10&name=*',
+    requiresAuth: true,
+    description: 'Gets a list of users',
+    example: `curl -X GET localhost:3000/api/user -H 'Authorization: Bearer tttttt'`,
+    response: {
+      users: [
+        {
+          id: 1,
+          name: '常用名字',
+          email: 'a@jwt.com',
+          roles: [{ role: 'admin' }],
+        },
+      ],
+    },
+  },
+  {
+    method: 'GET',
     path: '/api/user/me',
     requiresAuth: true,
     description: 'Get authenticated user',
@@ -22,6 +39,28 @@ userRouter.docs = [
     example: `curl -X PUT localhost:3000/api/user/1 -d '{"name":"常用名字", "email":"a@jwt.com", "password":"admin"}' -H 'Content-Type: application/json' -H 'Authorization: Bearer tttttt'`,
     response: { user: { id: 1, name: '常用名字', email: 'a@jwt.com', roles: [{ role: 'admin' }] }, token: 'tttttt' },
   },
+  {
+    method: 'GET',
+    path: '/api/user?page=1&limit=10&name=*',
+    requiresAuth: true,
+    description: 'Get a paginated list of users, optionally filtered by name',
+    example: `curl -X GET localhost:3000/api/user -H 'Authorization: Bearer tttttt'`,
+    response: {
+      users: [
+        { id: 3, name: 'Kai Chen', email: 'd@jwt.com', roles: [{ role: 'diner' }] },
+        { id: 5, name: 'Buddy', email: 'b@jwt.com', roles: [{ role: 'admin' }] }
+      ],
+      more: true
+    }
+  },
+  {
+    method: 'DELETE',
+    path: '/api/user/:userId',
+    requiresAuth: true,
+    description: 'Delete a user by ID (admin only)',
+    example: `curl -X DELETE localhost:3000/api/user/3 -H 'Authorization: Bearer tttttt'`,
+    response: { message: 'User deleted successfully' }
+  }
 ];
 
 // getUser
@@ -48,6 +87,85 @@ userRouter.put(
     const updatedUser = await DB.updateUser(userId, name, email, password);
     const auth = await setAuth(updatedUser);
     res.json({ user: updatedUser, token: auth });
+  })
+);
+
+// Get paginated list of users with optional name filter
+userRouter.get(
+  '/',
+  authRouter.authenticateToken,
+  asyncHandler(async (req, res) => {
+    const user = req.user;
+    if (!user.isRole(Role.Admin)) {
+      return res.status(403).json({ message: 'unauthorized' });
+    }
+
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const nameFilter = req.query.name ? req.query.name.replace(/\*/g, '%') : '%';
+
+    const connection = await DB.getConnection();
+    try {
+      const offset = (page - 1) * limit;
+      const users = await DB.query(
+        connection,
+        `SELECT id, name, email FROM user WHERE name LIKE ? ORDER BY id ASC LIMIT ?, ?`,
+        [nameFilter, offset, limit]
+      );
+
+      for (const u of users) {
+        const roles = await DB.query(
+          connection,
+          `SELECT role, objectId FROM userRole WHERE userId = ?`,
+          [u.id]
+        );
+        u.roles = roles.map((r) => ({ role: r.role, objectId: r.objectId }));
+      }
+
+      const totalRows = await DB.query(
+        connection,
+        `SELECT COUNT(*) as count FROM user WHERE name LIKE ?`,
+        [nameFilter]
+      );
+      const more = page * limit < totalRows[0].count;
+
+      res.json({ users, more });
+    } finally {
+      connection.end();
+    }
+  })
+);
+
+// Delete a user
+userRouter.delete(
+  '/:userId',
+  authRouter.authenticateToken,
+  asyncHandler(async (req, res) => {
+    const user = req.user;
+    if (!user.isRole(Role.Admin)) {
+      return res.status(403).json({ message: 'unauthorized' });
+    }
+
+    const userId = Number(req.params.userId);
+    const connection = await DB.getConnection();
+    try {
+      await connection.beginTransaction();
+      await DB.query(connection, `DELETE FROM userRole WHERE userId = ?`, [userId]);
+      const result = await DB.query(connection, `DELETE FROM user WHERE id = ?`, [userId]);
+
+      if (result.affectedRows === 0) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      await connection.commit();
+      res.json({ message: 'User deleted successfully' });
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.end();
+    }
   })
 );
 
