@@ -323,7 +323,7 @@ test('getFranchises calls getFranchise for admin', async () => {
 
   const getFranchiseSpy = jest.spyOn(DB, 'getFranchise').mockResolvedValue({ ...franchise, stores: [] });
 
-  const result = await DB.getFranchises({ isRole: () => true });
+  await DB.getFranchises({ isRole: () => true });
   expect(getFranchiseSpy).toHaveBeenCalled();
 });
 
