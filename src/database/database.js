@@ -326,7 +326,6 @@ async deleteUser(userId) {
   }
 }
 
-
   getOffset(currentPage = 1, listPerPage) {
     return (currentPage - 1) * [listPerPage];
   }
