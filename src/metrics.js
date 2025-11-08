@@ -69,42 +69,48 @@ function sendMetricToGrafana(metricName, metricValue, type, unit, useDouble = fa
       'Content-Type': 'application/json',
     },
   })
-    .then((res) => {
-      if (!res.ok) {
-        res.text().then((text) => {
-          console.error(`Failed to push metrics: ${text}`);
-        });
-      } else {
-        console.log(`Pushed ${metricName}: ${metricValue}`);
-      }
-    })
-    .catch((err) => console.error('Error sending metrics:', err));
+    // .then((res) => {
+    //   if (!res.ok) {
+    //     res.text().then((text) => {
+    //       console.error(`Failed to push metrics: ${text}`);
+    //     });
+    //   } else {
+    //     console.log(`Pushed ${metricName}: ${metricValue}`);
+    //   }
+    // })
+    // .catch((err) => console.error('Error sending metrics:', err));
 }
 
 /////////////////////////////
 // HTTP Request Metrics
 /////////////////////////////
 
+const requestCounts = {
+  total: 0,
+  get: 0,
+  post: 0,
+  put: 0,
+  delete: 0
+};
+
 function httpRequestTracker(req, res, next) {
   const startTime = Date.now();
 
-
   const trackRequest = () => {
     const latencyMs = Date.now() - startTime;
-    const method = req.method;
+    const method = req.method.toLowerCase();
     const path = req.path || 'unknown';
     
-    // Clean up the path for metric name (remove /api prefix, replace slashes)
     const metricPath = path.replace(/^\/api/, '').replace(/\//g, '_') || 'root';
     
-    // Send latency metric for this specific endpoint
-    sendMetricToGrafana(`http_${method.toLowerCase()}${metricPath}_latency`, latencyMs, 'gauge', 'ms');
+    // Increment counters
+    requestCounts.total++;
+    if (requestCounts[method] !== undefined) {
+      requestCounts[method]++;
+    }
     
-    // Send total request count (all methods)
-    sendMetricToGrafana(`http_request_total`, 1, 'sum', 'requests');
-    
-    // Send request count by method
-    sendMetricToGrafana(`http_${method.toLowerCase()}_requests`, 1, 'sum', 'requests');
+    // Still send latency per request
+    sendMetricToGrafana(`http_${method}${metricPath}_latency`, latencyMs, 'gauge', 'ms');
   };
   
   res.on('finish', () => {
@@ -113,6 +119,24 @@ function httpRequestTracker(req, res, next) {
   
   next();
 }
+
+// Send request counts every minute
+function sendRequestMetrics() {
+  sendMetricToGrafana('http_request_total', requestCounts.total, 'gauge', 'requests');
+  sendMetricToGrafana('http_get_requests', requestCounts.get, 'gauge', 'requests');
+  sendMetricToGrafana('http_post_requests', requestCounts.post, 'gauge', 'requests');
+  sendMetricToGrafana('http_put_requests', requestCounts.put, 'gauge', 'requests');
+  sendMetricToGrafana('http_delete_requests', requestCounts.delete, 'gauge', 'requests');
+  
+  // Reset counters
+  requestCounts.total = 0;
+  requestCounts.get = 0;
+  requestCounts.post = 0;
+  requestCounts.put = 0;
+  requestCounts.delete = 0;
+}
+
+setInterval(sendRequestMetrics, 60000);
 
 /////////////////////////////
 // Active Users Tracking
@@ -135,33 +159,69 @@ function sendActiveUsersMetric() {
 // Send active users count every minute and reset
 setInterval(sendActiveUsersMetric, 60000);
 
-
 /////////////////////////////
 // Authentication Metrics
 /////////////////////////////
 
+const authCounts = {
+  successful: 0,
+  failed: 0
+};
+
 function incrementAuthAttempt(success) {
   if (success) {
-    sendMetricToGrafana('auth_successful', 1, 'sum', 'attempts');
+    authCounts.successful++;
   } else {
-    sendMetricToGrafana('auth_failed', 1, 'sum', 'attempts');
+    authCounts.failed++;
   }
 }
+
+// Send auth attempt counts every minute
+function sendAuthMetrics() {
+  sendMetricToGrafana('auth_successful', authCounts.successful, 'gauge', 'attempts');
+  sendMetricToGrafana('auth_failed', authCounts.failed, 'gauge', 'attempts');
+  
+  // Reset counters
+  authCounts.successful = 0;
+  authCounts.failed = 0;
+}
+
+setInterval(sendAuthMetrics, 60000);
 
 /////////////////////////////
 // Pizza Metrics
 /////////////////////////////
 
+const pizzaCounts = {
+  sold: 0,
+  revenue: 0,
+  failures: 0
+};
+
 function pizzaPurchase(success, latency, pizzasSold, revenue) {
   if (success) {
-    sendMetricToGrafana('pizza_sold', pizzasSold, 'sum', 'pizzas');
-    sendMetricToGrafana('pizza_revenue', revenue, 'sum', 'cents', true);
+    pizzaCounts.sold += pizzasSold;
+    pizzaCounts.revenue += revenue;
     sendMetricToGrafana('pizza_creation_latency', latency, 'gauge', 'ms');
   } else {
-    sendMetricToGrafana('pizza_creation_failures', 1, 'sum', 'failures');
+    pizzaCounts.failures++;
     sendMetricToGrafana('pizza_creation_latency', latency, 'gauge', 'ms');
   }
 }
+
+// Send pizza metrics every minute
+function sendPizzaMetrics() {
+  sendMetricToGrafana('pizza_sold', pizzaCounts.sold, 'gauge', 'pizzas');
+  sendMetricToGrafana('pizza_revenue', pizzaCounts.revenue, 'gauge', 'bitcoin', true);
+  sendMetricToGrafana('pizza_creation_failures', pizzaCounts.failures, 'gauge', 'failures');
+  
+  // Reset counters
+  pizzaCounts.sold = 0;
+  pizzaCounts.revenue = 0;
+  pizzaCounts.failures = 0;
+}
+
+setInterval(sendPizzaMetrics, 60000);
 
 /////////////////////////////
 // Periodic System Metrics
