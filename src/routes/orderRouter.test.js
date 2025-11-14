@@ -4,6 +4,10 @@ const orderRouter = require('./orderRouter.js');
 const { DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 
+// Mock node-fetch (used by metrics.js)
+jest.mock('node-fetch', () => jest.fn());
+const nodeFetch = require('node-fetch');
+
 jest.mock('../database/database.js', () => ({
   DB: {
     getMenu: jest.fn(),
@@ -23,6 +27,20 @@ jest.mock('./authRouter.js', () => ({
   },
 }));
 
+jest.mock('../metrics.js', () => ({
+  httpRequestTracker: jest.fn((req, res, next) => next()),
+  pizzaPurchase: jest.fn(),
+  trackActiveUser: jest.fn(),
+}));
+
+jest.mock('../logger.js', () => ({
+  httpLogger: jest.fn((req, res, next) => next()),
+  factoryRequest: jest.fn(),
+  dbQuery: jest.fn(),
+  logException: jest.fn(),
+}));
+
+// Initialize fetch mock
 global.fetch = jest.fn();
 
 let app;
@@ -40,7 +58,11 @@ beforeEach(() => {
     next() // done to fulfill linting error
   });
 
+  // Clear mocks but preserve fetch
   jest.clearAllMocks();
+  
+  // Reset fetch mock with default implementation
+  global.fetch.mockReset();
 });
 
 test('GET /menu should return menu', async () => {
@@ -90,26 +112,32 @@ test('GET / should return orders', async () => {
 });
 
 test('POST / should create order successfully', async () => {
-  const orderReq = { franchiseId: 1, storeId: 1, items: [{ menuId: 1 }] };
+  const orderReq = { franchiseId: 1, storeId: 1, items: [{ menuId: 1, description: 'Veggie', price: 0.05 }] };
   const order = { id: 1, ...orderReq };
   DB.addDinerOrder.mockResolvedValue(order);
+  
   fetch.mockResolvedValueOnce({
     ok: true,
+    status: 200,
     json: async () => ({ reportUrl: 'url', jwt: '111111' }),
   });
+  
   const res = await request(app).post('/api/order').send(orderReq);
   expect(res.statusCode).toBe(200);
   expect(res.body).toEqual({ order, followLinkToEndChaos: 'url', jwt: '111111' });
 });
 
 test('POST / should handle failed factory API', async () => {
-  const orderReq = { franchiseId: 1, storeId: 1, items: [{ menuId: 1 }] };
+  const orderReq = { franchiseId: 1, storeId: 1, items: [{ menuId: 1, description: 'Veggie', price: 0.05 }] };
   const order = { id: 1, ...orderReq };
   DB.addDinerOrder.mockResolvedValue(order);
+  
   fetch.mockResolvedValueOnce({
     ok: false,
+    status: 500,
     json: async () => ({ reportUrl: 'url' }),
   });
+  
   const res = await request(app).post('/api/order').send(orderReq);
   expect(res.statusCode).toBe(500);
   expect(res.body).toEqual({ message: 'Failed to fulfill order at factory', followLinkToEndChaos: 'url' });
