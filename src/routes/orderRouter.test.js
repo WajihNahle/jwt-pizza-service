@@ -6,7 +6,6 @@ const { authRouter } = require('./authRouter.js');
 
 // Mock node-fetch (used by metrics.js)
 jest.mock('node-fetch', () => jest.fn());
-const nodeFetch = require('node-fetch');
 
 jest.mock('../database/database.js', () => ({
   DB: {
