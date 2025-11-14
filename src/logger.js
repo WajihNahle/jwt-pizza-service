@@ -86,6 +86,11 @@ class Logger {
   }
 
   sendLogToGrafana(event) {
+    // Skip logging if fetch is not available (e.g., in test environment)
+    if (typeof fetch === 'undefined') {
+      return;
+    }
+    
     const body = JSON.stringify(event);
     fetch(`${config.logging.url}`, {
       method: 'post',
